@@ -1,0 +1,1699 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Git Merge、Rebase 与 PR 合并详解</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            overflow: hidden;
+        }
+
+        .container {
+            width: 90%;
+            max-width: 1200px;
+            height: 90vh;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 1.8em;
+            margin-bottom: 5px;
+        }
+
+        .progress-bar {
+            height: 4px;
+            background: rgba(255, 255, 255, 0.3);
+            margin-top: 15px;
+            border-radius: 2px;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: white;
+            border-radius: 2px;
+            transition: width 0.5s ease;
+        }
+
+        .content {
+            flex: 1;
+            padding: 30px;
+            overflow-y: auto;
+            position: relative;
+        }
+
+        .slide {
+            display: none;
+            animation: fadeIn 0.5s ease;
+        }
+
+        .slide.active {
+            display: block;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .slide h2 {
+            color: #667eea;
+            margin-bottom: 20px;
+            font-size: 1.5em;
+        }
+
+        .slide p {
+            color: #333;
+            line-height: 1.8;
+            margin-bottom: 15px;
+        }
+
+        .commit-graph {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            margin: 20px 0;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 10px;
+            min-height: 200px;
+            transition: all 0.5s ease;
+        }
+
+        .branch {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .branch-label {
+            font-weight: bold;
+            min-width: 80px;
+            color: #555;
+        }
+
+        .commit {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+            font-size: 0.9em;
+            position: relative;
+            animation: commitAppear 0.5s ease;
+        }
+
+        @keyframes commitAppear {
+            from { transform: scale(0); opacity: 0; }
+            to { transform: scale(1); opacity: 1; }
+        }
+
+        .commit.main { background: #4CAF50; }
+        .commit.feature { background: #2196F3; }
+        .commit.merge { background: #FF9800; }
+        .commit.rebase { background: #9C27B0; }
+        .commit.conflict { background: #F44336; }
+
+        .arrow {
+            color: #999;
+            font-size: 1.2em;
+        }
+
+        .code-block {
+            background: #2d2d2d;
+            color: #f8f8f2;
+            padding: 15px 20px;
+            border-radius: 8px;
+            font-family: 'Courier New', monospace;
+            margin: 15px 0;
+            overflow-x: auto;
+        }
+
+        .code-block .comment { color: #75715e; }
+        .code-block .command { color: #66d9ef; }
+        .code-block .branch { color: #a6e22e; }
+
+        .comparison {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin: 20px 0;
+        }
+
+        .comparison-item {
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+        }
+
+        .comparison-item.merge {
+            background: linear-gradient(135deg, #ffecd2 0%, #fcb69f 100%);
+        }
+
+        .comparison-item.rebase {
+            background: linear-gradient(135deg, #a8edea 0%, #fed6e3 100%);
+        }
+
+        .comparison-item h3 {
+            margin-bottom: 10px;
+        }
+
+        .highlight {
+            background: yellow;
+            padding: 2px 5px;
+            border-radius: 3px;
+        }
+
+        .step-indicator {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            margin: 20px 0;
+        }
+
+        .step-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #ddd;
+            transition: all 0.3s ease;
+        }
+
+        .step-dot.active {
+            background: #667eea;
+            transform: scale(1.3);
+        }
+
+        .animation-container {
+            position: relative;
+            height: 250px;
+            margin: 20px 0;
+        }
+
+        .animated-branch {
+            position: absolute;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 1s ease;
+        }
+
+        .pr-strategy {
+            background: #f0f4ff;
+            padding: 15px;
+            border-radius: 10px;
+            margin: 15px 0;
+            border-left: 4px solid #667eea;
+        }
+
+        .pr-strategy h4 {
+            color: #667eea;
+            margin-bottom: 10px;
+        }
+
+        .conflict-demo {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 15px;
+            margin: 20px 0;
+        }
+
+        .conflict-box {
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .conflict-box.before { background: #ffebee; }
+        .conflict-box.resolving { background: #fff3e0; }
+        .conflict-box.after { background: #e8f5e9; }
+
+        .navigation {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px 30px;
+            background: #f8f9fa;
+            border-top: 1px solid #e0e0e0;
+        }
+
+        .nav-btn {
+            padding: 12px 25px;
+            border: none;
+            border-radius: 8px;
+            font-size: 1em;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .nav-btn.prev {
+            background: #e0e0e0;
+            color: #333;
+        }
+
+        .nav-btn.next {
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .nav-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
+        }
+
+        .nav-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .slide-counter {
+            font-weight: bold;
+            color: #667eea;
+        }
+
+        .icon {
+            font-size: 1.2em;
+            margin-right: 5px;
+        }
+
+        ul {
+            margin-left: 20px;
+            margin-bottom: 15px;
+        }
+
+        li {
+            margin: 8px 0;
+            line-height: 1.6;
+        }
+
+        .tip {
+            background: #e3f2fd;
+            padding: 15px;
+            border-radius: 8px;
+            border-left: 4px solid #2196F3;
+            margin: 15px 0;
+        }
+
+        .tip strong {
+            color: #2196F3;
+        }
+
+        @keyframes slideIn {
+            from { transform: translateX(-30px); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+
+        .animate-in {
+            animation: slideIn 0.5s ease forwards;
+        }
+
+        .delay-1 { animation-delay: 0.1s; opacity: 0; }
+        .delay-2 { animation-delay: 0.2s; opacity: 0; }
+        .delay-3 { animation-delay: 0.3s; opacity: 0; }
+        .delay-4 { animation-delay: 0.4s; opacity: 0; }
+        .delay-5 { animation-delay: 0.5s; opacity: 0; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🚀 Git Merge、Rebase 与 PR 合并详解</h1>
+            <p>使用左右键 ← → 切换步骤</p>
+            <div class="progress-bar">
+                <div class="progress-fill" id="progressFill"></div>
+            </div>
+        </div>
+
+        <div class="content" id="content">
+            <!-- Slide 1: 目录 -->
+            <div class="slide active" data-slide="0">
+                <h2>📚 课程目录</h2>
+                <ul>
+                    <li class="animate-in delay-1"><span class="icon">📌</span> <strong>Git Merge 做了什么？</strong> - 理解合并的本质</li>
+                    <li class="animate-in delay-2"><span class="icon">🔄</span> <strong>Git Rebase 做了什么？</strong> - 重写提交历史</li>
+                    <li class="animate-in delay-3"><span class="icon">⚖️</span> <strong>Merge vs Rebase</strong> - 对比与选择</li>
+                    <li class="animate-in delay-4"><span class="icon">🔀</span> <strong>PR 的三种合并方式</strong> - Merge Commit / Squash / Rebase</li>
+                    <li class="animate-in delay-5"><span class="icon">⚠️</span> <strong>多人协作解决冲突</strong> - PR 冲突如何处理</li>
+                    <li class="animate-in delay-5"><span class="icon">🔧</span> <strong>写一半 Main 更新了</strong> - 同步上游变更</li>
+                </ul>
+                <div class="tip animate-in delay-5">
+                    <strong>💡 提示:</strong> 使用键盘 <kbd>←</kbd> <kbd>→</kbd> 键切换步骤，每页都有动画演示！
+                </div>
+            </div>
+
+            <!-- Slide 2: Merge 概念 -->
+            <div class="slide" data-slide="1">
+                <h2>📌 Git Merge 做了什么？</h2>
+                <p><strong>Merge 的本质：</strong>将两个分支的修改合并在一起，<span class="highlight">保留完整的提交历史</span>。</p>
+                
+                <div class="animation-container">
+                    <div class="commit-graph">
+                        <div class="branch">
+                            <span class="branch-label">main:</span>
+                            <div class="commit main">A</div>
+                            <span class="arrow">→</span>
+                            <div class="commit main">B</div>
+                            <span class="arrow">→</span>
+                            <div class="commit main">C</div>
+                        </div>
+                        <div class="branch">
+                            <span class="branch-label">feature:</span>
+                            <div class="commit main">A</div>
+                            <span class="arrow">→</span>
+                            <div class="commit feature">D</div>
+                            <span class="arrow">→</span>
+                            <div class="commit feature">E</div>
+                        </div>
+                    </div>
+                    <p style="text-align: center; color: #667eea; font-weight: bold;">⬇️ 执行 <code>git merge feature</code></p>
+                    <div class="commit-graph">
+                        <div class="branch">
+                            <span class="branch-label">main:</span>
+                            <div class="commit main">A</div>
+                            <span class="arrow">→</span>
+                            <div class="commit main">B</div>
+                            <span class="arrow">→</span>
+                            <div class="commit main">C</div>
+                            <span class="arrow">→</span>
+                            <div class="commit merge">M</div>
+                        </div>
+                        <div class="branch" style="margin-left: 160px;">
+                            <span class="branch-label"></span>
+                            <div class="commit feature">D</div>
+                            <span class="arrow">→</span>
+                            <div class="commit feature">E</div>
+                            <span class="arrow" style="transform: rotate(-45deg);">↗</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="tip">
+                    <strong>✨ 关键点:</strong> Merge 会创建一个新的<strong>合并提交 M</strong>，它有两个父提交（C 和 E），完整保留了两个分支的历史。
+                </div>
+            </div>
+
+            <!-- Slide 3: Merge 动画演示 -->
+            <div class="slide" data-slide="2">
+                <h2>📌 Merge 逐步动画</h2>
+                <div class="step-indicator">
+                    <div class="step-dot active" data-step="0"></div>
+                    <div class="step-dot" data-step="1"></div>
+                    <div class="step-dot" data-step="2"></div>
+                    <div class="step-dot" data-step="3"></div>
+                </div>
+
+                <div id="mergeAnimation">
+                    <div class="commit-graph" style="min-height: 180px;">
+                        <div class="branch" id="mergeMainBranch">
+                            <span class="branch-label">main:</span>
+                            <div class="commit main">A</div>
+                            <span class="arrow">→</span>
+                            <div class="commit main">B</div>
+                            <span class="arrow">→</span>
+                            <div class="commit main" id="mergeCommitC">C</div>
+                            <span class="branch-label" style="color: #667eea;" id="mergeHead"> ← HEAD</span>
+                        </div>
+                        <div class="branch" id="mergeFeatureBranch">
+                            <span class="branch-label">feature:</span>
+                            <div class="commit main">A</div>
+                            <span class="arrow">→</span>
+                            <div class="commit feature">D</div>
+                            <span class="arrow">→</span>
+                            <div class="commit feature">E</div>
+                        </div>
+                        <div class="branch" id="mergeResultBranch" style="display: none; opacity: 0; transition: opacity 0.5s ease;">
+                            <span class="branch-label">main:</span>
+                            <div class="commit main">A</div>
+                            <span class="arrow">→</span>
+                            <div class="commit main">B</div>
+                            <span class="arrow">→</span>
+                            <div class="commit main">C</div>
+                            <span class="arrow">→</span>
+                            <div class="commit merge">M</div>
+                        </div>
+                        <div class="branch" id="mergeFeatureResult" style="display: none; margin-left: 160px; opacity: 0; transition: opacity 0.5s ease;">
+                            <div class="commit feature">D</div>
+                            <span class="arrow">→</span>
+                            <div class="commit feature">E</div>
+                            <span class="arrow" style="transform: rotate(-45deg);">↗</span>
+                        </div>
+                    </div>
+
+                    <div id="mergeStep0" class="code-block" style="display: block;">
+                        <span class="comment"># 步骤 1: 在 main 分支上</span><br>
+                        <span class="command">git</span> checkout <span class="branch">main</span><br><br>
+                        <span class="comment"># 当前状态: HEAD 指向 main 的最新提交 C</span>
+                    </div>
+
+                    <div id="mergeStep1" class="code-block" style="display: none;">
+                        <span class="comment"># 步骤 2: 执行合并命令</span><br>
+                        <span class="command">git</span> merge <span class="branch">feature</span><br><br>
+                        <span class="comment"># Git 会找到两个分支的共同祖先（A）</span><br>
+                        <span class="comment"># 然后计算 C 和 E 的差异</span>
+                    </div>
+
+                    <div id="mergeStep2" class="code-block" style="display: none;">
+                        <span class="comment"># 步骤 3: Git 自动合并（如果没有冲突）</span><br>
+                        <span class="comment"># - 合并两个分支的所有文件变更</span><br>
+                        <span class="comment"># - 创建新的合并提交 M，有两个父提交</span><br><br>
+                        <span class="comment"># 如果有冲突，Git 会暂停让你手动解决</span>
+                    </div>
+
+                    <div id="mergeStep3" class="code-block" style="display: none;">
+                        <span class="comment"># 步骤 4: 合并完成！</span><br>
+                        <span class="comment"># main 现在包含了 feature 的所有更改</span><br>
+                        <span class="comment"># 历史完整保留: A→B→C→M 和 A→D→E 都存在</span><br><br>
+                        <span class="command">git</span> log --graph <span class="comment"># 可以看到合并提交 M 有两条父线</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Slide 4: Rebase 概念 -->
+            <div class="slide" data-slide="3">
+                <h2>🔄 Git Rebase 做了什么？</h2>
+                <p><strong>Rebase 的本质：</strong>将你的提交"搬"到新的基础上，<span class="highlight">重写提交历史</span>，让历史变成线性。</p>
+                
+                <div class="animation-container">
+                    <p style="text-align: center; font-weight: bold; color: #666;">Before Rebase:</p>
+                    <div class="commit-graph">
+                        <div class="branch">
+                            <span class="branch-label">main:</span>
+                            <div class="commit main">A</div>
+                            <span class="arrow">→</span>
+                            <div class="commit main">B</div>
+                            <span class="arrow">→</span>
+                            <div class="commit main">C</div>
+                        </div>
+                        <div class="branch">
+                            <span class="branch-label">feature:</span>
+                            <div class="commit main">A</div>
+                            <span class="arrow">→</span>
+                            <div class="commit feature">D</div>
+                            <span class="arrow">→</span>
+                            <div class="commit feature">E</div>
+                        </div>
+                    </div>
+
+                    <p style="text-align: center; color: #9C27B0; font-weight: bold; font-size: 1.2em;">⬇️ 执行 <code>git rebase main</code>（在 feature 分支上）</p>
+
+                    <p style="text-align: center; font-weight: bold; color: #666;">After Rebase:</p>
+                    <div class="commit-graph">
+                        <div class="branch">
+                            <span class="branch-label">main:</span>
+                            <div class="commit main">A</div>
+                            <span class="arrow">→</span>
+                            <div class="commit main">B</div>
+                            <span class="arrow">→</span>
+                            <div class="commit main">C</div>
+                        </div>
+                        <div class="branch">
+                            <span class="branch-label">feature:</span>
+                            <span style="color: #999; margin: 0 10px;">(旧的 D, E 被丢弃)</span>
+                        </div>
+                        <div class="branch">
+                            <span class="branch-label"></span>
+                            <div class="commit main">A</div>
+                            <span class="arrow">→</span>
+                            <div class="commit main">B</div>
+                            <span class="arrow">→</span>
+                            <div class="commit main">C</div>
+                            <span class="arrow">→</span>
+                            <div class="commit rebase">D'</div>
+                            <span class="arrow">→</span>
+                            <div class="commit rebase">E'</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="tip">
+                    <strong>⚠️ 关键区别:</strong> Rebase 会<strong>创建新的提交</strong>（D' 和 E'），它们的 SHA 值与原来的 D、E 不同。<strong>历史被重写了！</strong>
+                </div>
+            </div>
+
+            <!-- Slide 5: Rebase 逐步动画 -->
+            <div class="slide" data-slide="4">
+                <h2>🔄 Rebase 逐步动画</h2>
+                <div class="step-indicator">
+                    <div class="step-dot active" data-step="0"></div>
+                    <div class="step-dot" data-step="1"></div>
+                    <div class="step-dot" data-step="2"></div>
+                    <div class="step-dot" data-step="3"></div>
+                    <div class="step-dot" data-step="4"></div>
+                </div>
+
+                <div id="rebaseAnimation">
+                    <div id="rebaseBefore">
+                        <div class="commit-graph" style="min-height: 180px;">
+                            <div class="branch">
+                                <span class="branch-label">main:</span>
+                                <div class="commit main">A</div>
+                                <span class="arrow">→</span>
+                                <div class="commit main">B</div>
+                                <span class="arrow">→</span>
+                                <div class="commit main">C</div>
+                            </div>
+                            <div class="branch">
+                                <span class="branch-label">feature:</span>
+                                <div class="commit main">A</div>
+                                <span class="arrow">→</span>
+                                <div class="commit feature">D</div>
+                                <span class="arrow">→</span>
+                                <div class="commit feature">E</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="rebaseMiddle" style="display: none;">
+                        <div class="commit-graph" style="min-height: 180px;">
+                            <div class="branch">
+                                <span class="branch-label">main:</span>
+                                <div class="commit main">A</div>
+                                <span class="arrow">→</span>
+                                <div class="commit main">B</div>
+                                <span class="arrow">→</span>
+                                <div class="commit main">C</div>
+                                <span class="branch-label" style="color: #9C27B0;"> ← feature (moved here)</span>
+                            </div>
+                            <div class="branch">
+                                <span class="branch-label">patches:</span>
+                                <div class="commit feature" style="border: 2px dashed #9C27B0;">D</div>
+                                <span style="color: #9C27B0; font-size: 1.5em;">⏸️</span>
+                                <div class="commit feature" style="border: 2px dashed #9C27B0;">E</div>
+                            </div>
+                            <p style="text-align: center; color: #9C27B0; font-size: 0.9em;">⬆️ 提交 D、E 被暂存为补丁，feature 分支已移到 C</p>
+                        </div>
+                    </div>
+
+                    <div id="rebaseAfter" style="display: none;">
+                        <div class="commit-graph" style="min-height: 180px;">
+                            <div class="branch">
+                                <span class="branch-label">main:</span>
+                                <div class="commit main">A</div>
+                                <span class="arrow">→</span>
+                                <div class="commit main">B</div>
+                                <span class="arrow">→</span>
+                                <div class="commit main">C</div>
+                                <span class="arrow">→</span>
+                                <div class="commit rebase">D'</div>
+                                <span class="arrow">→</span>
+                                <div class="commit rebase">E'</div>
+                                <span class="branch-label" style="color: #9C27B0;"> ← feature</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="rebaseStep0" class="code-block" style="display: block;">
+                        <span class="comment"># 步骤 1: 切换到 feature 分支</span><br>
+                        <span class="command">git</span> checkout <span class="branch">feature</span><br><br>
+                        <span class="comment"># 当前 feature 基于 A 分叉出去，有 D、E 两个提交</span>
+                    </div>
+
+                    <div id="rebaseStep1" class="code-block" style="display: none;">
+                        <span class="comment"># 步骤 2: 执行 rebase</span><br>
+                        <span class="command">git</span> rebase <span class="branch">main</span><br><br>
+                        <span class="comment"># Git 会找到共同祖先 A</span><br>
+                        <span class="comment"># 然后把 feature 的提交"摘下来"暂存</span>
+                    </div>
+
+                    <div id="rebaseStep2" class="code-block" style="display: none;">
+                        <span class="comment"># 步骤 3: Git 先将 feature 的改动暂存</span><br>
+                        <span class="comment"># - 保存 D 的变更为补丁 patch-D</span><br>
+                        <span class="comment"># - 保存 E 的变更为补丁 patch-E</span><br>
+                        <span class="comment"># - 将 feature 分支指向 main 的最新提交 C</span><br><br>
+                        <span class="comment"># 现在 feature 指向 C，补丁 D、E 待应用</span>
+                    </div>
+
+                    <div id="rebaseStep3" class="code-block" style="display: none;">
+                        <span class="comment"># 步骤 4: 逐个应用补丁</span><br>
+                        <span class="comment"># Git 在 C 的基础上应用 patch-D → 创建新提交 D'</span><br>
+                        <span class="comment"># Git 在 D' 的基础上应用 patch-E → 创建新提交 E'</span><br><br>
+                        <span class="comment"># 如果有冲突，会停下来让你解决</span><br>
+                        <span class="comment"># 解决后: git add . && git rebase --continue</span>
+                    </div>
+
+                    <div id="rebaseStep4" class="code-block" style="display: none;">
+                        <span class="comment"># 步骤 5: Rebase 完成！</span><br>
+                        <span class="comment"># feature 现在是: A→B→C→D'→E'（一条直线）</span><br>
+                        <span class="comment"># 旧的 D、E 被丢弃（灰色显示）</span><br><br>
+                        <span class="command">git</span> push -f origin <span class="branch">feature</span> <span class="comment"># 需要强制推送</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Slide 6: Merge vs Rebase 对比 -->
+            <div class="slide" data-slide="5">
+                <h2>⚖️ Merge vs Rebase 对比</h2>
+                
+                <div class="comparison">
+                    <div class="comparison-item merge">
+                        <h3>📌 Merge</h3>
+                        <ul style="text-align: left;">
+                            <li>✅ 保留完整历史</li>
+                            <li>✅ 安全，不修改历史</li>
+                            <li>✅ 适合共享分支</li>
+                            <li>❌ 历史会有分叉</li>
+                            <li>❌ 多次 merge 会杂乱</li>
+                        </ul>
+                        <div class="commit-graph" style="min-height: 100px; padding: 10px;">
+                            <div class="branch">
+                                <div class="commit main">A</div>
+                                <span class="arrow">→</span>
+                                <div class="commit main">B</div>
+                                <span class="arrow">→</span>
+                                <div class="commit merge">M</div>
+                            </div>
+                            <div class="branch" style="margin-left: 60px;">
+                                <div class="commit feature">C</div>
+                                <span class="arrow" style="transform: rotate(-45deg);">↗</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="comparison-item rebase">
+                        <h3>🔄 Rebase</h3>
+                        <ul style="text-align: left;">
+                            <li>✅ 历史整洁，线性</li>
+                            <li>✅ 便于理解变更顺序</li>
+                            <li>✅ 适合本地整理</li>
+                            <li>❌ 重写历史，需 force push</li>
+                            <li>❌ <strong>不要对公共分支使用！</strong></li>
+                        </ul>
+                        <div class="commit-graph" style="min-height: 100px; padding: 10px;">
+                            <div class="branch">
+                                <div class="commit main">A</div>
+                                <span class="arrow">→</span>
+                                <div class="commit main">B</div>
+                                <span class="arrow">→</span>
+                                <div class="commit rebase">C'</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="tip">
+                    <strong>🎯 黄金法则:</strong> <strong>永远不要 rebase 已经被 push 到远程、别人可能已经拉取的分支！</strong> 只 rebase 你自己的本地分支。
+                </div>
+            </div>
+
+            <!-- Slide 7: PR 三种合并方式 -->
+            <div class="slide" data-slide="6">
+                <h2>🔀 PR 的三种合并方式</h2>
+                <p>在 GitHub/GitLab 上合并 PR 时，通常有三种选择：</p>
+
+                <div class="pr-strategy">
+                    <h4>1️⃣ Create a Merge Commit（创建合并提交）</h4>
+                    <p>相当于 <code>git merge --no-ff</code>，保留完整的分叉历史和 PR 信息。</p>
+                    <div class="code-block">
+<span class="comment"># 结果:</span>
+main: A → B → C → <span class="branch">M</span>
+               ↗
+feat: D → E ↗
+                    </div>
+                    <p><strong>适用场景:</strong> 需要保留功能分支的完整开发历史。</p>
+                </div>
+
+                <div class="pr-strategy">
+                    <h4>2️⃣ Squash and Merge（压缩并合并）</h4>
+                    <p>将 PR 的所有提交压缩成<strong>一个提交</strong>，然后合并到 main。历史最简洁。</p>
+                    <div class="code-block">
+<span class="comment"># 结果:</span>
+main: A → B → C → <span class="branch">[D+E]</span>
+<span class="comment"># feature 分支的 D 和 E 被压缩成一个提交</span>
+                    </div>
+                    <p><strong>适用场景:</strong> 功能分支有很多小提交（"fix", "wip"），只想让 main 保持整洁。</p>
+                </div>
+
+                <div class="pr-strategy">
+                    <h4>3️⃣ Rebase and Merge（变基并合并）</h4>
+                    <p>将 PR 的每个提交逐个 rebase 到 main 上，<strong>不压缩</strong>，保留每个提交。</p>
+                    <div class="code-block">
+<span class="comment"># 结果:</span>
+main: A → B → C → D' → E'
+<span class="comment"># 每个提交都被重新基于 main 创建</span>
+                    </div>
+                    <p><strong>适用场景:</strong> 想保留每个提交的独立性，又想要线性历史。</p>
+                </div>
+            </div>
+
+            <!-- Slide 8: PR 合并动画演示 -->
+            <div class="slide" data-slide="7">
+                <h2>🔀 PR 三种合并方式动画对比</h2>
+                <div class="step-indicator">
+                    <div class="step-dot active" data-step="0"></div>
+                    <div class="step-dot" data-step="1"></div>
+                    <div class="step-dot" data-step="2"></div>
+                </div>
+
+                <div id="prAnimation">
+                    <div id="prBefore">
+                        <div class="commit-graph" style="min-height: 120px;">
+                            <div class="branch">
+                                <span class="branch-label">main:</span>
+                                <div class="commit main">A</div>
+                                <span class="arrow">→</span>
+                                <div class="commit main">B</div>
+                                <span class="arrow">→</span>
+                                <div class="commit main">C</div>
+                            </div>
+                            <div class="branch">
+                                <span class="branch-label">PR:</span>
+                                <div class="commit main">A</div>
+                                <span class="arrow">→</span>
+                                <div class="commit feature">D</div>
+                                <span class="arrow">→</span>
+                                <div class="commit feature">E</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="prMiddle" style="display: none;">
+                        <div class="commit-graph" style="min-height: 120px;">
+                            <div class="branch">
+                                <span class="branch-label">main:</span>
+                                <div class="commit main">A</div>
+                                <span class="arrow">→</span>
+                                <div class="commit main">B</div>
+                                <span class="arrow">→</span>
+                                <div class="commit main">C</div>
+                                <span class="arrow">→</span>
+                                <div class="commit merge" style="font-size: 0.7em;">[D+E]</div>
+                            </div>
+                            <p style="text-align: center; color: #FF9800; font-size: 0.9em;">⬆️ D 和 E 被压缩成一个提交！</p>
+                        </div>
+                    </div>
+
+                    <div id="prAfter" style="display: none;">
+                        <div class="commit-graph" style="min-height: 120px;">
+                            <div class="branch">
+                                <span class="branch-label">main:</span>
+                                <div class="commit main">A</div>
+                                <span class="arrow">→</span>
+                                <div class="commit main">B</div>
+                                <span class="arrow">→</span>
+                                <div class="commit main">C</div>
+                                <span class="arrow">→</span>
+                                <div class="commit rebase">D'</div>
+                                <span class="arrow">→</span>
+                                <div class="commit rebase">E'</div>
+                            </div>
+                            <p style="text-align: center; color: #9C27B0; font-size: 0.9em;">⬆️ D、E 被逐个 rebase 到 main 上</p>
+                        </div>
+                    </div>
+
+                    <div id="prStep0" class="code-block" style="display: block;">
+                        <span class="comment"># 1️⃣ Merge Commit 方式</span><br><br>
+                        <span class="command">git</span> checkout <span class="branch">main</span><br>
+                        <span class="command">git</span> merge --no-ff <span class="branch">feature</span> -m "Merge PR #1"<br><br>
+                        <span class="comment"># 结果: A→B→C→M</span><br>
+                        <span class="comment">#         ↗</span><br>
+                        <span class="comment">#       D→E↗</span><br>
+                        <span class="comment"># ✅ 保留完整历史，包括 PR 信息</span>
+                    </div>
+
+                    <div id="prStep1" class="code-block" style="display: none;">
+                        <span class="comment"># 2️⃣ Squash and Merge 方式</span><br><br>
+                        <span class="command">git</span> checkout <span class="branch">main</span><br>
+                        <span class="command">git</span> merge --squash <span class="branch">feature</span><br>
+                        <span class="command">git</span> commit -m "Feature: 添加了XX功能"<br><br>
+                        <span class="comment"># 结果: A→B→C→[D+E]</span><br>
+                        <span class="comment"># ✅ main 历史整洁，一个功能一个提交</span><br>
+                        <span class="comment"># ❌ 丢失了 feature 分支的提交细节</span>
+                    </div>
+
+                    <div id="prStep2" class="code-block" style="display: none;">
+                        <span class="comment"># 3️⃣ Rebase and Merge 方式</span><br><br>
+                        <span class="comment"># GitHub 内部执行类似:</span><br>
+                        <span class="command">git</span> checkout <span class="branch">feature</span><br>
+                        <span class="command">git</span> rebase <span class="branch">main</span><br>
+                        <span class="command">git</span> checkout <span class="branch">main</span><br>
+                        <span class="command">git</span> merge <span class="branch">feature</span> <span class="comment"># 此时是快进合并</span><br><br>
+                        <span class="comment"># 结果: A→B→C→D'→E'</span><br>
+                        <span class="comment"># ✅ 保留每个提交的独立性，线性历史</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Slide 9: 多人协作冲突 -->
+            <div class="slide" data-slide="8">
+                <h2>⚠️ 多人协作：PR 如何解决冲突</h2>
+                <p>当多个人修改了<strong>同一个文件的同一部分</strong>，就会产生冲突。</p>
+
+                <div class="conflict-demo">
+                    <div class="conflict-box before">
+                        <h4>😱 冲突产生</h4>
+                        <div class="code-block" style="font-size: 0.8em;">
+<span class="comment"># main 上 Alice 改了:</span>
+<span class="branch">def hello():</span>
+<span class="branch">    print("Hello Alice")</span>
+
+<span class="comment"># PR 上 Bob 也改了:</span>
+<span class="branch">def hello():</span>
+<span class="branch">    print("Hello Bob")</span>
+                        </div>
+                        <p style="color: #F44336; font-weight: bold;">❌ Git 不知道该保留谁</p>
+                    </div>
+
+                    <div class="conflict-box resolving">
+                        <h4>🔧 解决冲突</h4>
+                        <div class="code-block" style="font-size: 0.8em;">
+<span class="comment"># 1. 拉取 main 的最新</span>
+<span class="command">git</span> checkout <span class="branch">feature</span>
+<span class="command">git</span> pull origin main
+
+<span class="comment"># 2. Git 标记冲突</span>
+<span class="comment"># 3. 手动编辑冲突文件</span>
+<span class="comment"># 4. 标记已解决</span>
+<span class="command">git</span> add .
+<span class="command">git</span> commit
+                        </div>
+                    </div>
+
+                    <div class="conflict-box after">
+                        <h4>✅ 冲突解决</h4>
+                        <div class="code-block" style="font-size: 0.8em;">
+<span class="comment"># 解决后的代码:</span>
+<span class="branch">def hello(name):</span>
+<span class="branch">    print(f"Hello {name}")</span>
+
+<span class="comment"># PR 自动更新！</span>
+<span class="comment"># GitHub 会重新检查 CI</span>
+<span class="comment"># 审查者可以看到解决后的 diff</span>
+                        </div>
+                        <p style="color: #4CAF50; font-weight: bold;">✓ PR 可以继续合并</p>
+                    </div>
+                </div>
+
+                <div class="tip">
+                    <strong>💡 最佳实践:</strong> 在 PR 期间，定期将 main 的变更合并到 feature 分支，可以<strong>提前发现冲突</strong>，避免最后一次性解决大量冲突。
+                </div>
+            </div>
+
+            <!-- Slide 10: 冲突解决动画 -->
+            <div class="slide" data-slide="9">
+                <h2>⚠️ 冲突解决逐步演示</h2>
+                <div class="step-indicator">
+                    <div class="step-dot active" data-step="0"></div>
+                    <div class="step-dot" data-step="1"></div>
+                    <div class="step-dot" data-step="2"></div>
+                    <div class="step-dot" data-step="3"></div>
+                </div>
+
+                <div id="conflictAnimation">
+                    <div id="conflictGraph1">
+                        <div class="conflict-demo">
+                            <div class="conflict-box before">
+                                <h4>👤 你的 feature 分支</h4>
+                                <div class="code-block" style="font-size: 0.8em;">
+<span class="comment"># config.py</span>
+DATABASE_URL = <span class="branch">"localhost/dev"</span>
+NEW_FEATURE = <span class="branch">True</span>
+                                </div>
+                                <p>你添加了 NEW_FEATURE</p>
+                            </div>
+                            <div class="conflict-box before">
+                                <h4>👤 同事的 main</h4>
+                                <div class="code-block" style="font-size: 0.8em;">
+<span class="comment"># config.py</span>
+DATABASE_URL = <span class="branch">"prod-server/main"</span>
+                                </div>
+                                <p>同事改了 DATABASE_URL</p>
+                            </div>
+                            <div class="conflict-box before">
+                                <h4>💥 同一文件同一行被双方修改</h4>
+                                <p style="color: #F44336; font-weight: bold; font-size: 1.5em;">⚠️</p>
+                                <p>Git 不知道该保留谁</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="conflictGraph2" style="display: none;">
+                        <div class="code-block" style="font-size: 0.9em;">
+<span class="comment"># 你尝试同步 main 到 feature:</span><br>
+<span class="command">git</span> checkout <span class="branch">feature</span><br>
+<span class="command">git</span> merge origin/main<br><br>
+
+<span class="comment"># 💥 Git 报错: CONFLICT in config.py!</span><br>
+<span class="comment"># Git 标记冲突如下:</span><br><br>
+
+<<<<<<< HEAD<br>
+DATABASE_URL = <span class="branch">"localhost/dev"</span><br>
+NEW_FEATURE = <span class="branch">True</span><br>
+=======<br>
+DATABASE_URL = <span class="branch">"prod-server/main"</span><br>
+>>>>>>> origin/main
+                        </div>
+                    </div>
+
+                    <div id="conflictGraph3" style="display: none;">
+                        <div class="code-block" style="font-size: 0.9em;">
+<span class="comment"># 你手动编辑文件，删除冲突标记，决定最终代码:</span><br><br>
+
+<span class="comment"># ✅ 解决后的 config.py:</span><br>
+DATABASE_URL = <span class="branch">"prod-server/main"</span><br>
+NEW_FEATURE = <span class="branch">True</span><br><br>
+
+<span class="comment"># 你决定: 采用同事的 URL + 保留你的新功能</span><br><br>
+
+<span class="command">git</span> add config.py<br>
+<span class="command">git</span> commit -m "Merge main: resolve config conflict"
+                        </div>
+                    </div>
+
+                    <div id="conflictGraph4" style="display: none;">
+                        <div class="conflict-demo">
+                            <div class="conflict-box after">
+                                <h4>✅ 推送到远程</h4>
+                                <div class="code-block" style="font-size: 0.8em;">
+<span class="command">git</span> push origin <span class="branch">feature</span>
+                                </div>
+                            </div>
+                            <div class="conflict-box after">
+                                <h4>✅ PR 自动更新</h4>
+                                <div style="font-size: 0.85em;">
+                                    <p>✓ 冲突已解决</p>
+                                    <p>✓ CI 重新运行</p>
+                                    <p>✓ 审查者可见最终变更</p>
+                                </div>
+                            </div>
+                            <div class="conflict-box after">
+                                <h4>🎉 PR 可以合并了</h4>
+                                <p>审查者 approve 后即可合并</p>
+                                <p style="font-size: 2em;">🚀</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="conflictStep0" class="code-block" style="display: block;">
+                        <span class="comment"># 场景: 你在 feature 分支开发 PR</span><br>
+                        <span class="comment"># 同时，同事在 main 上修改了同一个文件</span><br><br>
+                        <span class="comment"># ⬆️ 看图：双方都改了 config.py 的 DATABASE_URL</span>
+                    </div>
+
+                    <div id="conflictStep1" class="code-block" style="display: none;">
+                        <span class="comment"># Git 检测到冲突，暂停合并</span><br>
+                        <span class="comment"># 冲突标记 <<<<<<< 和 >>>>>>> 之间的内容是冲突区域</span><br>
+                        <span class="comment"># ======= 上方是你的代码，下方是 main 的代码</span><br><br>
+                        <span class="comment"># 现在需要你手动编辑文件，决定保留什么</span>
+                    </div>
+
+                    <div id="conflictStep2" class="code-block" style="display: none;">
+                        <span class="comment"># 编辑文件后，告诉 Git 冲突已解决</span><br><br>
+                        <span class="comment"># 解决方案: 用同事的 prod URL + 你的 NEW_FEATURE</span><br>
+                        <span class="comment"># 这样双方的工作都被保留了</span>
+                    </div>
+
+                    <div id="conflictStep3" class="code-block" style="display: none;">
+                        <span class="comment"># 推送后，GitHub 上的 PR 自动更新！</span><br>
+                        <span class="comment"># 审查者可以看到解决冲突后的完整变更</span><br>
+                        <span class="comment"># 再也不用担心冲突导致 PR 卡住了 🎉</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Slide 11: 写一半 Main 更新了 -->
+            <div class="slide" data-slide="10">
+                <h2>🔧 写一半 Main 更新了怎么办？</h2>
+                <p>这是日常开发最常见的场景！你在 feature 分支开发到一半，main 已经有了新的提交。</p>
+
+                <div class="code-block">
+<span class="comment"># 你的场景:</span>
+main:    A → B → C → <span class="branch">D</span> → <span class="branch">E</span>  <span class="comment"># main 有了新提交 D, E</span>
+feature: A → B → <span class="highlight">F</span> → <span class="highlight">G</span>      <span class="comment"># 你还在 F, G 开发中</span>
+                </div>
+
+                <p><strong>你有两种选择来同步 main 的变更：</strong></p>
+
+                <div class="comparison">
+                    <div class="comparison-item merge">
+                        <h3>方案 1: Merge</h3>
+                        <div class="code-block" style="font-size: 0.85em;">
+<span class="command">git</span> checkout <span class="branch">feature</span><br>
+<span class="command">git</span> merge main
+                        </div>
+                        <p><strong>优点:</strong></p>
+                        <ul style="text-align: left; font-size: 0.9em;">
+                            <li>✅ 简单安全</li>
+                            <li>✅ 保留历史记录</li>
+                            <li>✅ 容易回滚</li>
+                        </ul>
+                        <p><strong>结果:</strong></p>
+                        <div style="font-size: 0.85em;">
+                            feature: A→B→F→G→<span class="branch">M</span><br>
+                            &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;↗<br>
+                            main: A→B→C→D→E↗
+                        </div>
+                    </div>
+                    <div class="comparison-item rebase">
+                        <h3>方案 2: Rebase</h3>
+                        <div class="code-block" style="font-size: 0.85em;">
+<span class="command">git</span> checkout <span class="branch">feature</span><br>
+<span class="command">git</span> rebase main
+                        </div>
+                        <p><strong>优点:</strong></p>
+                        <ul style="text-align: left; font-size: 0.9em;">
+                            <li>✅ 历史线性整洁</li>
+                            <li>✅ 便于后续 cherry-pick</li>
+                            <li>❌ 会重写你的提交</li>
+                        </ul>
+                        <p><strong>结果:</strong></p>
+                        <div style="font-size: 0.85em;">
+                            feature: A→B→C→D→E→F'→G'
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Slide 12: 同步 Main 动画 -->
+            <div class="slide" data-slide="11">
+                <h2>🔧 同步 Main 逐步动画</h2>
+                <div class="step-indicator">
+                    <div class="step-dot active" data-step="0"></div>
+                    <div class="step-dot" data-step="1"></div>
+                    <div class="step-dot" data-step="2"></div>
+                    <div class="step-dot" data-step="3"></div>
+                </div>
+
+                <div id="syncAnimation">
+                    <div id="syncBefore">
+                        <div class="commit-graph" style="min-height: 120px;">
+                            <div class="branch">
+                                <span class="branch-label">main:</span>
+                                <div class="commit main">A</div>
+                                <span class="arrow">→</span>
+                                <div class="commit main">B</div>
+                                <span class="arrow">→</span>
+                                <div class="commit main">C</div>
+                                <span class="arrow">→</span>
+                                <div class="commit main">D</div>
+                                <span class="arrow">→</span>
+                                <div class="commit main">E</div>
+                            </div>
+                            <div class="branch">
+                                <span class="branch-label">feature:</span>
+                                <div class="commit main">A</div>
+                                <span class="arrow">→</span>
+                                <div class="commit main">B</div>
+                                <span class="arrow">→</span>
+                                <div class="commit feature">F</div>
+                                <span class="arrow">→</span>
+                                <div class="commit feature">G</div>
+                            </div>
+                        </div>
+                        <p style="text-align: center; color: #F44336;">⚠️ feature 基于旧 main (B)，错过了 C、D、E</p>
+                    </div>
+
+                    <div id="syncMerge" style="display: none;">
+                        <div class="commit-graph" style="min-height: 120px;">
+                            <div class="branch">
+                                <span class="branch-label">main:</span>
+                                <div class="commit main">A</div>
+                                <span class="arrow">→</span>
+                                <div class="commit main">B</div>
+                                <span class="arrow">→</span>
+                                <div class="commit main">C</div>
+                                <span class="arrow">→</span>
+                                <div class="commit main">D</div>
+                                <span class="arrow">→</span>
+                                <div class="commit main">E</div>
+                            </div>
+                            <div class="branch">
+                                <span class="branch-label">feature:</span>
+                                <div class="commit main">A</div>
+                                <span class="arrow">→</span>
+                                <div class="commit main">B</div>
+                                <span class="arrow">→</span>
+                                <div class="commit feature">F</div>
+                                <span class="arrow">→</span>
+                                <div class="commit feature">G</div>
+                                <span class="arrow">→</span>
+                                <div class="commit merge">M</div>
+                            </div>
+                            <p style="text-align: center; color: #FF9800;">⬆️ git merge main → 创建合并提交 M</p>
+                        </div>
+                    </div>
+
+                    <div id="syncRebase" style="display: none;">
+                        <div class="commit-graph" style="min-height: 120px;">
+                            <div class="branch">
+                                <span class="branch-label">main:</span>
+                                <div class="commit main">A</div>
+                                <span class="arrow">→</span>
+                                <div class="commit main">B</div>
+                                <span class="arrow">→</span>
+                                <div class="commit main">C</div>
+                                <span class="arrow">→</span>
+                                <div class="commit main">D</div>
+                                <span class="arrow">→</span>
+                                <div class="commit main">E</div>
+                                <span class="arrow">→</span>
+                                <div class="commit rebase">F'</div>
+                                <span class="arrow">→</span>
+                                <div class="commit rebase">G'</div>
+                                <span class="branch-label" style="color: #9C27B0;"> ← feature</span>
+                            </div>
+                            <p style="text-align: center; color: #9C27B0;">⬆️ git rebase main → F、G 重放到 E 后面</p>
+                        </div>
+                    </div>
+
+                    <div id="syncAfter" style="display: none;">
+                        <div class="comparison">
+                            <div class="comparison-item merge">
+                                <h3>✅ Merge 结果</h3>
+                                <div style="font-size: 0.85em;">
+                                    <p>feature 包含了 main 的所有变更</p>
+                                    <p>历史保留完整，有合并提交 M</p>
+                                    <p><code>git push origin feature</code></p>
+                                </div>
+                            </div>
+                            <div class="comparison-item rebase">
+                                <h3>✅ Rebase 结果</h3>
+                                <div style="font-size: 0.85em;">
+                                    <p>feature 是一条线性历史</p>
+                                    <p>基于 main 最新的 E</p>
+                                    <p><code>git push -f origin feature</code></p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="syncStep0" class="code-block" style="display: block;">
+                        <span class="comment"># 现状分析:</span><br>
+                        <span class="comment"># - 你在 feature 分支开发了 F, G</span><br>
+                        <span class="comment"># - main 已经有了新提交 C, D, E</span><br>
+                        <span class="comment"># - 你的 feature 是基于旧 main (B) 的</span><br><br>
+                        <span class="comment"># ⚠️ 需要同步 main 的变更，避免冲突积累</span>
+                    </div>
+
+                    <div id="syncStep1" class="code-block" style="display: none;">
+                        <span class="comment"># 方案 1: 使用 Merge 同步</span><br><br>
+                        <span class="command">git</span> checkout <span class="branch">feature</span><br>
+                        <span class="command">git</span> fetch origin<br>
+                        <span class="command">git</span> merge origin/main<br><br>
+
+                        <span class="comment"># Git 会:</span><br>
+                        <span class="comment"># 1. 找到共同祖先 (B)</span><br>
+                        <span class="comment"># 2. 合并 C, D, E 到 feature</span><br>
+                        <span class="comment"># 3. 如果有冲突，停下来让你解决</span><br>
+                        <span class="comment"># 4. 创建合并提交 M</span>
+                    </div>
+
+                    <div id="syncStep2" class="code-block" style="display: none;">
+                        <span class="comment"># 方案 2: 使用 Rebase 同步</span><br><br>
+                        <span class="command">git</span> checkout <span class="branch">feature</span><br>
+                        <span class="command">git</span> fetch origin<br>
+                        <span class="command">git</span> rebase origin/main<br><br>
+
+                        <span class="comment"># Git 会:</span><br>
+                        <span class="comment"># 1. 将 feature 指向 main 最新的 E</span><br>
+                        <span class="comment"># 2. 逐个重放 F, G 到新的基础上</span><br>
+                        <span class="comment"># 3. 如果某个提交有冲突，暂停</span><br>
+                        <span class="comment"># 4. 你解决后: git add . && git rebase --continue</span>
+                    </div>
+
+                    <div id="syncStep3" class="code-block" style="display: none;">
+                        <span class="comment"># 🎯 应该选哪个？</span><br><br>
+
+                        <span class="comment"># ✅ 推荐: 本地开发用 Rebase，共享分支用 Merge</span><br>
+                        <span class="comment">#   - 只有你用 feature → rebase (历史整洁)</span><br>
+                        <span class="comment">#   - 别人也基于 feature → merge (不改写历史)</span><br><br>
+
+                        <span class="comment"># 📝 最佳实践:</span><br>
+                        <span class="comment">#   定期同步 main，不要等到 PR 前才合并！</span><br>
+                        <span class="comment">#   小步快跑，冲突少且容易解决</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Slide 13: 总结 -->
+            <div class="slide" data-slide="12">
+                <h2>🎯 总结与最佳实践</h2>
+
+                <div class="tip">
+                    <strong>1. Merge vs Rebase</strong><br>
+                    • Merge 保留完整历史，适合共享分支<br>
+                    • Rebase 让历史线性，适合本地整理<br>
+                    • <strong>永远不要 rebase 公共分支！</strong>
+                </div>
+
+                <div class="tip">
+                    <strong>2. PR 合并方式选择</strong><br>
+                    • <strong>Merge Commit:</strong> 需要保留完整开发历史<br>
+                    • <strong>Squash:</strong> 功能分支有很多小提交，想保持 main 整洁<br>
+                    • <strong>Rebase:</strong> 想保留每个提交独立性，又要线性历史
+                </div>
+
+                <div class="tip">
+                    <strong>3. 冲突解决</strong><br>
+                    • 定期同步 main 到 feature，提前发现冲突<br>
+                    • 冲突不可怕，Git 会标记冲突位置，手动解决即可<br>
+                    • 解决后推送，PR 自动更新
+                </div>
+
+                <div class="tip">
+                    <strong>4. Main 更新了怎么办？</strong><br>
+                    • 只有你用 feature 分支 → <code>git rebase main</code><br>
+                    • 别人也基于 feature → <code>git merge main</code><br>
+                    • 小步快跑，频繁同步，冲突少且好解决
+                </div>
+
+                <div style="text-align: center; margin-top: 30px; font-size: 1.2em; color: #667eea;">
+                    <strong>🚀 掌握了这些，你就能自信地处理任何 Git 场景了！</strong>
+                </div>
+            </div>
+        </div>
+
+        <div class="navigation">
+            <button class="nav-btn prev" id="prevBtn" onclick="prevSlide()">← 上一页</button>
+            <span class="slide-counter" id="slideCounter">1 / 13</span>
+            <button class="nav-btn next" id="nextBtn" onclick="nextSlide()">下一页 →</button>
+        </div>
+    </div>
+
+    <script>
+        // ==================== 全局变量 ====================
+        // currentSlide: 当前在第几页（从0开始）
+        let currentSlide = 0;
+        // slides: 获取所有页面（class为slide的元素）
+        const slides = document.querySelectorAll('.slide');
+        // totalSlides: 总共有多少页
+        const totalSlides = slides.length;
+
+        // ==================== 页面切换 ====================
+        /**
+         * 更新当前显示的页面
+         * 功能：
+         * 1. 隐藏所有页面，只显示当前页
+         * 2. 如果当前页有逐步动画，自动显示第一步
+         * 3. 更新页码、进度条、按钮状态
+         */
+        function updateSlide() {
+            // 遍历所有页面，只显示当前页，隐藏其他页
+            slides.forEach((slide, index) => {
+                slide.classList.remove('active'); // 先移除所有页面的active样式
+                if (index === currentSlide) {
+                    slide.classList.add('active'); // 给当前页添加active样式，让它显示出来
+                    // 如果当前页有"逐步动画"（页面上有小圆点），就自动显示第一步
+                    const dots = slide.querySelectorAll('.step-dot');
+                    if (dots.length > 0) {
+                        showStep(slide, 0); // 调用showStep显示第0步（第一步）
+                    }
+                }
+            });
+
+            // 更新页码显示（如 "1 / 13"）
+            document.getElementById('slideCounter').textContent = `${currentSlide + 1} / ${totalSlides}`;
+            // 更新顶部进度条宽度
+            document.getElementById('progressFill').style.width = `${((currentSlide + 1) / totalSlides) * 100}%`;
+
+            // 控制"上一页"和"下一页"按钮的禁用状态
+            document.getElementById('prevBtn').disabled = currentSlide === 0; // 第一页时禁用上一页
+            document.getElementById('nextBtn').disabled = currentSlide === totalSlides - 1; // 最后一页时禁用下一页
+        }
+
+        /**
+         * 翻到下一页
+         */
+        function nextSlide() {
+            if (currentSlide < totalSlides - 1) { // 确保不是最后一页
+                currentSlide++;
+                updateSlide();
+            }
+        }
+
+        /**
+         * 翻到上一页
+         */
+        function prevSlide() {
+            if (currentSlide > 0) { // 确保不是第一页
+                currentSlide--;
+                updateSlide();
+            }
+        }
+
+        // ==================== 逐步动画导航 ====================
+        /**
+         * 获取当前页面中"逐步动画"的步骤索引
+         * 比如当前在第3步，就返回 3
+         */
+        function getCurrentStepIndex(slideEl) {
+            const activeDot = slideEl.querySelector('.step-dot.active'); // 找到当前高亮的小圆点
+            if (!activeDot) return 0; // 没有高亮的圆点，说明还没初始化，默认返回0
+            return parseInt(activeDot.dataset.step); // 返回小圆点上标记的步骤号
+        }
+
+        /**
+         * 获取当前页面总共有多少个步骤
+         * 就是数一下有多少个小圆点
+         */
+        function getTotalSteps(slideEl) {
+            return slideEl.querySelectorAll('.step-dot').length;
+        }
+
+        /**
+         * 在当前页面内"前进到下一步骤"
+         * 返回值：如果成功前进返回true，如果已经在最后一步了返回false
+         */
+        function nextStep() {
+            const slideEl = slides[currentSlide]; // 获取当前页面
+            const totalSteps = getTotalSteps(slideEl); // 获取当前页面有多少步骤
+            if (totalSteps === 0) return false; // 没有步骤，直接返回false
+            const currentStep = getCurrentStepIndex(slideEl); // 获取当前在第几步
+            if (currentStep < totalSteps - 1) { // 如果还没到最后一步
+                showStep(slideEl, currentStep + 1); // 显示下一步
+                return true; // 成功前进
+            }
+            return false; // 已经在最后一步了
+        }
+
+        /**
+         * 在当前页面内"后退到上一步骤"
+         * 返回值：如果成功后退返回true，如果已经在第一步了返回false
+         */
+        function prevStep() {
+            const slideEl = slides[currentSlide];
+            const totalSteps = getTotalSteps(slideEl);
+            if (totalSteps === 0) return false;
+            const currentStep = getCurrentStepIndex(slideEl);
+            if (currentStep > 0) { // 如果当前不在第一步
+                showStep(slideEl, currentStep - 1); // 显示上一步
+                return true; // 成功后退
+            }
+            return false; // 已经在第一步了
+        }
+
+        // ==================== 键盘控制 ====================
+        /**
+         * 监听键盘事件，实现用键盘控制导航
+         * 右箭头 → 或空格：前进
+         * 左箭头 ←：后退
+         * 
+         * 智能逻辑：
+         * - 如果当前页面有逐步动画，先尝试在页面内切换步骤
+         * - 如果已经在最后/第一步了，才切换到上/下一页
+         * - 如果当前页面没有逐步动画，直接切换页面
+         */
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowRight' || e.key === ' ') {
+                // 按了右箭头或空格 → 前进
+                e.preventDefault(); // 阻止默认行为（比如空格会滚动页面）
+                const slideEl = slides[currentSlide];
+                const hasSteps = getTotalSteps(slideEl) > 0; // 当前页面是否有逐步动画
+                if (hasSteps) {
+                    // 有逐步动画：先尝试在页面内前进到下一步骤
+                    if (!nextStep()) {
+                        // 如果nextStep返回false，说明已经在最后一步了，那就翻到下一页
+                        nextSlide();
+                    }
+                } else {
+                    // 没有逐步动画的页面，直接翻到下一页
+                    nextSlide();
+                }
+            } else if (e.key === 'ArrowLeft') {
+                // 按了左箭头 → 后退
+                e.preventDefault();
+                const slideEl = slides[currentSlide];
+                const hasSteps = getTotalSteps(slideEl) > 0;
+                if (hasSteps) {
+                    // 有逐步动画：先尝试在页面内后退到上一步骤
+                    if (!prevStep()) {
+                        // 如果prevStep返回false，说明已经在第一步了，那就翻到上一页
+                        prevSlide();
+                    }
+                } else {
+                    // 没有逐步动画的页面，直接翻到上一页
+                    prevSlide();
+                }
+            }
+        });
+
+        // ==================== 小圆点点击 ====================
+        /**
+         * 给所有"步骤小圆点"添加点击事件
+         * 点击小圆点可以直接跳到对应的步骤
+         */
+        document.querySelectorAll('.step-dot').forEach((dot) => {
+            dot.addEventListener('click', () => {
+                const parent = dot.closest('.slide'); // 找到小圆点所在的页面
+                const stepIndex = parseInt(dot.dataset.step); // 读取小圆点上的步骤号
+                showStep(parent, stepIndex); // 跳转到对应步骤
+            });
+        });
+
+        // ==================== 核心：显示指定步骤 ====================
+        /**
+         * showStep 是整个逐步动画的核心函数
+         * 功能：
+         * 1. 隐藏当前页面的所有步骤内容
+         * 2. 显示指定步骤的内容（代码块）
+         * 3. 根据步骤号，切换上方的"提交关系图"（就是那些圆形节点的动画）
+         * 
+         * @param {HTMLElement} slideEl - 当前页面的DOM元素
+         * @param {number} stepIndex - 要显示第几步（从0开始）
+         */
+        function showStep(slideEl, stepIndex) {
+            // ---- 第1部分：隐藏所有步骤的代码块 ----
+            // 选择所有步骤代码块（id以mergeStep、rebaseStep等开头的元素），全部隐藏
+            slideEl.querySelectorAll('[id^="mergeStep"], [id^="rebaseStep"], [id^="prStep"], [id^="conflictStep"], [id^="syncStep"]').forEach(el => {
+                el.style.display = 'none';
+            });
+
+            // ---- 第2部分：显示目标步骤的代码块 ----
+            // 更新小圆点的高亮状态
+            const dots = slideEl.querySelectorAll('.step-dot');
+            dots.forEach(d => d.classList.remove('active')); // 先清除所有高亮
+            const targetDot = slideEl.querySelector(`.step-dot[data-step="${stepIndex}"]`); // 找到目标步骤的小圆点
+            if (targetDot) targetDot.classList.add('active'); // 高亮目标小圆点
+
+            // 显示目标步骤的代码块（id以Step+步骤号结尾的元素）
+            const stepEl = slideEl.querySelector(`[id$="Step${stepIndex}"]`);
+            if (stepEl) stepEl.style.display = 'block';
+
+            // ---- 第3部分：处理 Merge 页面的图形动画 ----
+            // Merge 页面有两组图形：合并前（两个分支）和合并后（合并提交M）
+            const mergeMainBranch = slideEl.querySelector('#mergeMainBranch'); // main分支（合并前）
+            const mergeFeatureBranch = slideEl.querySelector('#mergeFeatureBranch'); // feature分支
+            const mergeResultBranch = slideEl.querySelector('#mergeResultBranch'); // 合并后的main（包含M提交）
+            const mergeFeatureResult = slideEl.querySelector('#mergeFeatureResult'); // 合并后指向M的feature分支
+            const mergeHead = slideEl.querySelector('#mergeHead'); // HEAD指针
+
+            if (mergeMainBranch && mergeResultBranch) {
+                // 步骤0-1：显示合并前的状态（两个独立分支）
+                if (stepIndex <= 1) {
+                    mergeMainBranch.style.display = 'flex';
+                    mergeMainBranch.style.opacity = '1';
+                    mergeFeatureBranch.style.display = 'flex';
+                    mergeFeatureBranch.style.opacity = '1';
+                    mergeResultBranch.style.display = 'none';
+                    mergeResultBranch.style.opacity = '0';
+                    mergeFeatureResult.style.display = 'none';
+                    mergeFeatureResult.style.opacity = '0';
+                    if (mergeHead) mergeHead.style.display = 'inline'; // 显示HEAD指针
+                }
+                // 步骤2：仍然显示合并前，但隐藏HEAD指针（表示正在执行merge）
+                else if (stepIndex === 2) {
+                    mergeMainBranch.style.display = 'flex';
+                    mergeMainBranch.style.opacity = '1';
+                    mergeFeatureBranch.style.display = 'flex';
+                    mergeFeatureBranch.style.opacity = '1';
+                    mergeResultBranch.style.display = 'none';
+                    mergeResultBranch.style.opacity = '0';
+                    mergeFeatureResult.style.display = 'none';
+                    mergeFeatureResult.style.opacity = '0';
+                    if (mergeHead) mergeHead.style.display = 'none'; // 隐藏HEAD指针
+                }
+                // 步骤3：显示合并后的状态（有M提交）
+                else {
+                    mergeMainBranch.style.display = 'none'; // 隐藏旧的分支
+                    mergeMainBranch.style.opacity = '0';
+                    mergeFeatureBranch.style.display = 'none';
+                    mergeFeatureBranch.style.opacity = '0';
+                    mergeResultBranch.style.display = 'flex'; // 显示合并后的分支
+                    setTimeout(() => { mergeResultBranch.style.opacity = '1'; }, 50); // 淡入效果
+                    mergeFeatureResult.style.display = 'flex';
+                    setTimeout(() => { mergeFeatureResult.style.opacity = '1'; }, 50);
+                    if (mergeHead) mergeHead.style.display = 'none';
+                }
+            }
+
+            // ---- 第4部分：处理 Rebase 页面的图形动画 ----
+            // Rebase 页面有三组图形：rebase前、中间（暂存补丁）、rebase后
+            const rebaseBefore = slideEl.querySelector('#rebaseBefore'); // rebase前：两个分叉的分支
+            const rebaseMiddle = slideEl.querySelector('#rebaseMiddle'); // 中间状态：feature移到main最新，D/E暂存为补丁
+            const rebaseAfter = slideEl.querySelector('#rebaseAfter'); // rebase后：线性历史
+
+            if (rebaseBefore && rebaseAfter) {
+                // 步骤0-1：显示rebase前的状态
+                if (stepIndex <= 1) {
+                    rebaseBefore.style.display = 'block';
+                    rebaseMiddle.style.display = 'none';
+                    rebaseAfter.style.display = 'none';
+                }
+                // 步骤2：显示中间状态（补丁暂存）
+                else if (stepIndex === 2) {
+                    rebaseBefore.style.display = 'none';
+                    rebaseMiddle.style.display = 'block';
+                    rebaseAfter.style.display = 'none';
+                }
+                // 步骤3-4：显示rebase后的线性历史
+                else {
+                    rebaseBefore.style.display = 'none';
+                    rebaseMiddle.style.display = 'none';
+                    rebaseAfter.style.display = 'block';
+                }
+            }
+
+            // ---- 第5部分：处理 PR 合并页面的图形动画 ----
+            // PR 页面有三组图形：合并前、Squash结果、Rebase结果
+            const prBefore = slideEl.querySelector('#prBefore'); // 合并前：main和PR分叉
+            const prMiddle = slideEl.querySelector('#prMiddle'); // Squash：压缩成一个提交
+            const prAfter = slideEl.querySelector('#prAfter'); // Rebase：逐个重放
+
+            if (prBefore && prAfter) {
+                // 步骤0：Merge Commit 方式，显示合并前的状态
+                if (stepIndex === 0) {
+                    prBefore.style.display = 'block';
+                    prMiddle.style.display = 'none';
+                    prAfter.style.display = 'none';
+                }
+                // 步骤1：Squash 方式，显示压缩后的结果
+                else if (stepIndex === 1) {
+                    prBefore.style.display = 'none';
+                    prMiddle.style.display = 'block';
+                    prAfter.style.display = 'none';
+                }
+                // 步骤2：Rebase 方式，显示线性重放的结果
+                else {
+                    prBefore.style.display = 'none';
+                    prMiddle.style.display = 'none';
+                    prAfter.style.display = 'block';
+                }
+            }
+
+            // ---- 第6部分：处理冲突解决页面的图形动画 ----
+            // 冲突页面有4个不同的视图
+            const conflictGraph1 = slideEl.querySelector('#conflictGraph1'); // 步骤0：双方各自的修改
+            const conflictGraph2 = slideEl.querySelector('#conflictGraph2'); // 步骤1：冲突标记
+            const conflictGraph3 = slideEl.querySelector('#conflictGraph3'); // 步骤2：解决后
+            const conflictGraph4 = slideEl.querySelector('#conflictGraph4'); // 步骤3：推送成功
+
+            if (conflictGraph1) {
+                // 每一步只显示对应的图形，其他都隐藏
+                conflictGraph1.style.display = stepIndex === 0 ? 'block' : 'none';
+                conflictGraph2.style.display = stepIndex === 1 ? 'block' : 'none';
+                conflictGraph3.style.display = stepIndex === 2 ? 'block' : 'none';
+                conflictGraph4.style.display = stepIndex === 3 ? 'block' : 'none';
+            }
+
+            // ---- 第7部分：处理同步 Main 页面的图形动画 ----
+            // 同步页面有4个视图：同步前、Merge结果、Rebase结果、对比总结
+            const syncBefore = slideEl.querySelector('#syncBefore'); // 同步前：feature落后于main
+            const syncMerge = slideEl.querySelector('#syncMerge'); // Merge同步的结果
+            const syncRebase = slideEl.querySelector('#syncRebase'); // Rebase同步的结果
+            const syncAfter = slideEl.querySelector('#syncAfter'); // 两种方案对比
+
+            if (syncBefore && syncAfter) {
+                // 步骤0：显示同步前的状态
+                if (stepIndex === 0) {
+                    syncBefore.style.display = 'block';
+                    syncMerge.style.display = 'none';
+                    syncRebase.style.display = 'none';
+                    syncAfter.style.display = 'none';
+                }
+                // 步骤1：显示Merge方案
+                else if (stepIndex === 1) {
+                    syncBefore.style.display = 'none';
+                    syncMerge.style.display = 'block';
+                    syncRebase.style.display = 'none';
+                    syncAfter.style.display = 'none';
+                }
+                // 步骤2：显示Rebase方案
+                else if (stepIndex === 2) {
+                    syncBefore.style.display = 'none';
+                    syncMerge.style.display = 'none';
+                    syncRebase.style.display = 'block';
+                    syncAfter.style.display = 'none';
+                }
+                // 步骤3：显示两种方案对比
+                else {
+                    syncBefore.style.display = 'none';
+                    syncMerge.style.display = 'none';
+                    syncRebase.style.display = 'none';
+                    syncAfter.style.display = 'block';
+                }
+            }
+        }
+
+        // ==================== 自动播放（已禁用） ====================
+        // 自动播放功能已被禁用，因为现在用户用左右键手动控制步骤
+        let autoStepInterval = null;
+        
+        function startAutoStep() {
+            // 已禁用：用户通过左右键手动控制
+        }
+
+        function stopAutoStep() {
+            clearInterval(autoStepInterval);
+        }
+
+        // ==================== 手机触摸滑动支持 ====================
+        /**
+         * 实现手机上的左右滑动切换
+         * 原理：记录手指按下和抬起的位置，计算滑动距离和方向
+         */
+        let touchStartX = 0; // 手指按下时的X坐标
+        let touchEndX = 0; // 手指抬起时的X坐标
+
+        // 监听手指按下事件
+        document.addEventListener('touchstart', (e) => {
+            touchStartX = e.changedTouches[0].screenX; // 记录按下时的X坐标
+        });
+
+        // 监听手指抬起事件
+        document.addEventListener('touchend', (e) => {
+            touchEndX = e.changedTouches[0].screenX; // 记录抬起时的X坐标
+            const diff = touchStartX - touchEndX; // 计算滑动距离（正数=向左滑，负数=向右滑）
+            if (Math.abs(diff) > 50) { // 滑动距离超过50像素才算有效滑动
+                if (diff > 0) {
+                    // 向左滑 → 前进
+                    if (!nextStep()) nextSlide(); // 先尝试前进到下一步骤，如果不行就翻到下一页
+                } else {
+                    // 向右滑 → 后退
+                    if (!prevStep()) prevSlide(); // 先尝试后退到上一步骤，如果不行就翻到上一页
+                }
+            }
+        });
+
+        // ==================== 页面初始化 ====================
+        // 页面加载时调用updateSlide，显示第一页
+        updateSlide();
+    </script>
+</body>
+</html>
