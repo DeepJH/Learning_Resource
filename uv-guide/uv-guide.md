@@ -1,6 +1,7 @@
 # uv 快速入门教程
 
 > 面向 Python 开发者的现代包管理工具指南
+> 推荐观看[视频](https://www.youtube.com/watch?v=jd1aRE5pJWc&t=175s)
 
 ---
 
@@ -59,6 +60,7 @@ uv self update
 
 ## 3. 创建项目
 
+> # **💡 提示** > 以下命令虽然简单完整，但是不够通用。如果你不是新手，建议前往[常用命令](uv-common-commands.md)速查指令。
 ### 初始化新项目
 
 ```bash
