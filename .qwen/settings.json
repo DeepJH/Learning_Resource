@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(uv *)",
+      "Bash(sleep *)",
+      "Bash(curl *)",
+      "Bash(kill *)",
+      "Bash(true)",
+      "Bash(mkdir *)",
+      "Bash(cp *)"
+    ]
+  },
+  "$version": 3
+}
